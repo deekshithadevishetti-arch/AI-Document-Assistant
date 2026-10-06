@@ -2,16 +2,16 @@ import streamlit as st
 from pathlib import Path
 from transformers import pipeline
 
-from rag.document_loader import load_document
-from rag.text_chunker import chunk_text
-from rag.embeddings import generate_embeddings
-from rag.vector_store import add_documents
-from rag.search import search_documents
+from document_loader import load_document
+from text_chunker import chunk_text
+from embeddings import generate_embeddings
+from vector_store import add_documents
+from search import search_documents
 
 
-# --------------------------------------------------
-# Page Configuration
-# --------------------------------------------------
+# ==================================================
+# PAGE CONFIGURATION
+# ==================================================
 
 st.set_page_config(
     page_title="AI Documentation Assistant",
@@ -23,32 +23,32 @@ st.title("📚 AI Documentation Assistant")
 st.write("Upload a document and ask questions about its content.")
 
 
-# --------------------------------------------------
-# Project Paths
-# --------------------------------------------------
+# ==================================================
+# PROJECT PATHS
+# ==================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+
 DATA_DIR.mkdir(exist_ok=True)
 
-ALLOWED_EXTENSIONS = {"pdf", "txt", "docx"}
 
-
-# --------------------------------------------------
-# Load Question Answering Model
-# --------------------------------------------------
+# ==================================================
+# AI QUESTION ANSWERING MODEL
+# ==================================================
 
 @st.cache_resource
 def load_qa_model():
+
     return pipeline(
         "question-answering",
         model="distilbert-base-cased-distilled-squad"
     )
 
 
-# --------------------------------------------------
-# Document Upload
-# --------------------------------------------------
+# ==================================================
+# DOCUMENT UPLOAD
+# ==================================================
 
 st.header("📄 Upload Document")
 
@@ -61,13 +61,14 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
 
     filename = Path(uploaded_file.name).name
+
     file_path = DATA_DIR / filename
 
     if st.button("Process Document"):
 
         try:
 
-            # Save document
+            # Save uploaded document
             with open(file_path, "wb") as file:
                 file.write(uploaded_file.getbuffer())
 
@@ -76,23 +77,27 @@ if uploaded_file is not None:
 
             if not text.strip():
 
-                st.error("No readable text was found in the document.")
+                st.error(
+                    "No readable text was found in the document."
+                )
 
             else:
 
-                # Create chunks
+                # Create text chunks
                 chunks = chunk_text(text)
 
                 if not chunks:
 
-                    st.error("Could not create text chunks.")
+                    st.error(
+                        "Could not create text chunks."
+                    )
 
                 else:
 
                     # Generate embeddings
                     embeddings = generate_embeddings(chunks)
 
-                    # Store in ChromaDB
+                    # Store documents
                     add_documents(
                         chunks,
                         embeddings,
@@ -100,20 +105,20 @@ if uploaded_file is not None:
                     )
 
                     st.success(
-                        f"Successfully processed {filename}. "
-                        f"Added {len(chunks)} text chunks."
+                        f"Successfully processed {filename} "
+                        f"with {len(chunks)} text chunks."
                     )
 
-        except Exception as exc:
+        except Exception as error:
 
             st.error(
-                f"Document processing failed: {exc}"
+                f"Document processing failed: {error}"
             )
 
 
-# --------------------------------------------------
-# Ask Question
-# --------------------------------------------------
+# ==================================================
+# QUESTION ANSWERING
+# ==================================================
 
 st.header("💬 Ask a Question")
 
@@ -132,7 +137,7 @@ if st.button("Ask Question"):
 
         try:
 
-            # Search documents
+            # Search relevant document chunks
             results = search_documents(
                 question,
                 top_k=3
@@ -142,18 +147,18 @@ if st.button("Ask Question"):
 
                 st.warning(
                     "No relevant documents found. "
-                    "Please upload and process a document first."
+                    "Please process a document first."
                 )
 
             else:
 
-                # Create context
+                # Build context
                 context = "\n\n".join(
                     result["text"]
                     for result in results
                 )
 
-                # Get sources
+                # Get source names
                 sources = list(
                     dict.fromkeys(
                         result["source"]
@@ -173,23 +178,27 @@ if st.button("Ask Question"):
                 answer = response["answer"]
                 score = response["score"]
 
-                st.subheader("Answer")
+                st.subheader("✅ Answer")
 
                 if score < 0.10:
+
                     st.info(
                         "The answer was not clearly found "
                         "in the uploaded document."
                     )
+
                 else:
+
                     st.write(answer)
 
                 st.subheader("📑 Sources")
 
                 for source in sources:
+
                     st.write(f"• {source}")
 
-        except Exception as exc:
+        except Exception as error:
 
             st.error(
-                f"Could not generate an answer: {exc}"
+                f"Could not generate an answer: {error}"
             )
