@@ -1,19 +1,10 @@
-from sentence_transformers import SentenceTransformer
-
-from rag.vector_store import search_vectors
-
-
-model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
+from embeddings import generate_embedding
+from vector_store import search_vectors
 
 
 def search_documents(query, top_k=3):
 
-    query_embedding = model.encode(
-        query,
-        normalize_embeddings=True
-    ).tolist()
+    query_embedding = generate_embedding(query)
 
     results = search_vectors(
         query_embedding,
@@ -27,10 +18,24 @@ def search_documents(query, top_k=3):
     search_results = []
 
     for i in range(len(documents)):
+
+        source = "Unknown"
+
+        if i < len(metadatas):
+            source = metadatas[i].get(
+                "source",
+                "Unknown"
+            )
+
+        distance = 0.0
+
+        if i < len(distances):
+            distance = float(distances[i])
+
         search_results.append({
             "text": documents[i],
-            "source": metadatas[i]["source"],
-            "distance": float(distances[i])
+            "source": source,
+            "distance": distance
         })
 
     return search_results
