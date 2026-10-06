@@ -13,192 +13,227 @@ from search import search_documents
 # PAGE CONFIGURATION
 # ==================================================
 
-st.set_page_config(
-    page_title="AI Documentation Assistant",
-    page_icon="📚",
-    layout="wide"
-)
 
-st.title("📚 AI Documentation Assistant")
-st.write("Upload a document and ask questions about its content.")
+app = Flask(__name__)
 
-
-# ==================================================
-# PROJECT PATHS
-# ==================================================
+# --------------------------------------------------
+# Project paths
+# --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-
 DATA_DIR.mkdir(exist_ok=True)
 
 
-# ==================================================
-# AI QUESTION ANSWERING MODEL
-# ==================================================
+# --------------------------------------------------
+# Configuration
+# --------------------------------------------------
 
-@st.cache_resource
-def load_qa_model():
+ALLOWED_EXTENSIONS = {"pdf", "txt", "docx"}
+OLLAMA_MODEL = "llama3.2"
 
-    return pipeline(
-        "question-answering",
-        model="distilbert-base-cased-distilled-squad"
+
+# --------------------------------------------------
+# Check allowed file
+# --------------------------------------------------
+
+def allowed_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
     )
 
 
-# ==================================================
-# DOCUMENT UPLOAD
-# ==================================================
+# --------------------------------------------------
+# Main page
+# --------------------------------------------------
 
-st.header("📄 Upload Document")
+@app.route("/", methods=["GET", "POST"])
+def index():
 
-uploaded_file = st.file_uploader(
-    "Choose a PDF, TXT, or DOCX file",
-    type=["pdf", "txt", "docx"]
-)
+    message = ""
+    answer = ""
+    sources = []
 
+    if request.method == "POST":
 
-if uploaded_file is not None:
+        action = request.form.get("action", "")
 
-    filename = Path(uploaded_file.name).name
+        # ==================================================
+        # UPLOAD DOCUMENT
+        # ==================================================
 
-    file_path = DATA_DIR / filename
+        if action == "upload":
 
-    if st.button("Process Document"):
+            uploaded_file = request.files.get("document")
 
-        try:
+            if not uploaded_file or not uploaded_file.filename:
 
-            # Save uploaded document
-            with open(file_path, "wb") as file:
-                file.write(uploaded_file.getbuffer())
+                message = "Please select a PDF, TXT, or DOCX file."
 
-            # Read document
-            text = load_document(file_path)
+            elif not allowed_file(uploaded_file.filename):
 
-            if not text.strip():
-
-                st.error(
-                    "No readable text was found in the document."
-                )
+                message = "Only PDF, TXT, and DOCX files are supported."
 
             else:
 
-                # Create text chunks
-                chunks = chunk_text(text)
-
-                if not chunks:
-
-                    st.error(
-                        "Could not create text chunks."
-                    )
-
-                else:
-
-                    # Generate embeddings
-                    embeddings = generate_embeddings(chunks)
-
-                    # Store documents
-                    add_documents(
-                        chunks,
-                        embeddings,
-                        source=filename
-                    )
-
-                    st.success(
-                        f"Successfully processed {filename} "
-                        f"with {len(chunks)} text chunks."
-                    )
-
-        except Exception as error:
-
-            st.error(
-                f"Document processing failed: {error}"
-            )
-
-
-# ==================================================
-# QUESTION ANSWERING
-# ==================================================
-
-st.header("💬 Ask a Question")
-
-question = st.text_input(
-    "Enter your question about the document"
-)
-
-
-if st.button("Ask Question"):
-
-    if not question.strip():
-
-        st.warning("Please enter a question.")
-
-    else:
-
-        try:
-
-            # Search relevant document chunks
-            results = search_documents(
-                question,
-                top_k=3
-            )
-
-            if not results:
-
-                st.warning(
-                    "No relevant documents found. "
-                    "Please process a document first."
+                filename = secure_filename(
+                    uploaded_file.filename
                 )
+
+                file_path = DATA_DIR / filename
+
+                try:
+
+                    # Save uploaded file
+                    uploaded_file.save(file_path)
+
+                    # Read document
+                    text = load_document(file_path)
+
+                    if not text.strip():
+
+                        message = (
+                            "No readable text was found in the document."
+                        )
+
+                    else:
+
+                        # Split text into chunks
+                        chunks = chunk_text(text)
+
+                        if not chunks:
+
+                            message = (
+                                "Could not create text chunks."
+                            )
+
+                        else:
+
+                            # Generate embeddings
+                            embeddings = generate_embeddings(chunks)
+
+                            # Store chunks in ChromaDB
+                            add_documents(
+                                chunks,
+                                embeddings,
+                                source=filename
+                            )
+
+                            message = (
+                                f"Successfully processed {filename}. "
+                                f"Added {len(chunks)} text chunks."
+                            )
+
+                except Exception as exc:
+
+                    message = (
+                        f"Document processing failed: {exc}"
+                    )
+
+        # ==================================================
+        # ASK QUESTION
+        # ==================================================
+
+        elif action == "ask":
+
+            question = request.form.get(
+                "question",
+                ""
+            ).strip()
+
+            if not question:
+
+                message = "Please enter a question."
 
             else:
 
-                # Build context
-                context = "\n\n".join(
-                    result["text"]
-                    for result in results
-                )
+                try:
 
-                # Get source names
-                sources = list(
-                    dict.fromkeys(
-                        result["source"]
-                        for result in results
-                    )
-                )
-
-                # Load QA model
-                qa_model = load_qa_model()
-
-                # Generate answer
-                response = qa_model(
-                    question=question,
-                    context=context
-                )
-
-                answer = response["answer"]
-                score = response["score"]
-
-                st.subheader("✅ Answer")
-
-                if score < 0.10:
-
-                    st.info(
-                        "The answer was not clearly found "
-                        "in the uploaded document."
+                    # Search document database
+                    results = search_documents(
+                        question,
+                        top_k=3
                     )
 
-                else:
+                    if not results:
 
-                    st.write(answer)
+                        message = (
+                            "No relevant documents found. "
+                            "Please upload a document first."
+                        )
 
-                st.subheader("📑 Sources")
+                    else:
 
-                for source in sources:
+                        # Build context
+                        context = "\n\n".join(
+                            result["text"]
+                            for result in results
+                        )
 
-                    st.write(f"• {source}")
+                        # Get sources
+                        sources = list(
+                            dict.fromkeys(
+                                result["source"]
+                                for result in results
+                            )
+                        )
 
-        except Exception as error:
+                        # Ask Ollama
+                        response = ollama.chat(
+                            model=OLLAMA_MODEL,
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "You are a document question "
+                                        "answering assistant. "
+                                        "Answer using only the provided "
+                                        "document context. "
+                                        "If the answer is not present "
+                                        "in the context, clearly say "
+                                        "that the information was not "
+                                        "found in the document."
+                                    )
+                                },
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Document context:\n\n"
+                                        + context
+                                        + "\n\nQuestion:\n"
+                                        + question
+                                    )
+                                }
+                            ],
+                            options={
+                                "num_predict": 512
+                            }
+                        )
 
-            st.error(
-                f"Could not generate an answer: {error}"
-            )
+                        answer = response["message"]["content"]
+
+                except Exception as exc:
+
+                    message = (
+                        f"Could not generate an answer: {exc}"
+                    )
+
+    return render_template(
+        "index.html",
+        message=message,
+        answer=answer,
+        sources=sources
+    )
+
+
+# --------------------------------------------------
+# Start Flask
+# --------------------------------------------------
+
+if __name__ == "__main__":
+
+    app.run(
+        debug=False,
+        use_reloader=False
+    )
